@@ -22,6 +22,13 @@
 .plan-actions{display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-width:242px}
 .plan-actions .btn{padding:6px 9px;font-size:12px}
 .plan-actions .mini-act{padding:6px 9px}
+.sel-box{width:20px!important;height:20px;min-width:20px;padding:0!important;margin:0;flex-shrink:0;accent-color:var(--green);cursor:pointer}
+.entry.selected{background:rgba(255,137,146,.07);border-radius:10px}
+.bulkbar{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:10px 12px;margin:0 0 6px;border:1px solid #2a3c58;border-radius:11px;background:#101a2b}
+.bulkbar label{display:flex;align-items:center;gap:9px;font-size:13px;font-weight:600;cursor:pointer}
+.bulkbar .block-actions{gap:6px}
+.dup-group{border:1px solid #645233;border-radius:12px;padding:2px 10px;margin-top:10px;background:rgba(255,212,139,.04)}
+.dup-group .sub{padding-top:8px}
 @media(max-width:700px){.plan-actions{min-width:215px}}
 
 /* Revisão da importação de PDF protegida por senha */
@@ -57,7 +64,7 @@
 const KEY='lume-financas-offline-v1',VERSION=1;
 const fresh=()=>({version:VERSION,accounts:[],transactions:[],cards:[],purchases:[],payments:[],assets:[],events:[],otherAssets:[],liabilities:[],goals:[],snapshots:[],recurrences:[],recurrenceExceptions:[],categoryRules:[]});
 const viewItems=[['home','▦','Painel'],['transactions','⇅','Lançamentos'],['accounts','▣','Contas'],['cards','▤','Cartões'],['assets','◈','Investimentos'],['payouts','◇','Proventos'],['balance','▥','Patrimônio'],['planning','◷','Planejamento'],['goals','◎','Metas'],['settings','⚙','Ajustes']];
-let st=fresh(),persistent=true,currentView='home',searchTerm='',transKindFilter='all',assetFilter='all',cardCategoryFilter='all',month=localToday().slice(0,7),cardMonth=month,modalSave=null,invoiceFile=null,invoiceRows=[],invoiceMeta=null,invoiceCsvData=null;
+let st=fresh(),persistent=true,currentView='home',searchTerm='',transKindFilter='all',assetFilter='all',cardCategoryFilter='all',cardSelected=new Set(),month=localToday().slice(0,7),cardMonth=month,modalSave=null,invoiceFile=null,invoiceRows=[],invoiceMeta=null,invoiceCsvData=null;
 const $=s=>document.querySelector(s),$$=s=>Array.from(document.querySelectorAll(s));
 function localToday(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
 function esc(v){return String(v==null?'':v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
@@ -107,11 +114,11 @@ function payoutNet(e){return round(payoutGross(e)*(1-num(e.taxRate)/100))}
 function monthIncome(m){return round(st.transactions.filter(t=>t.type==='income'&&t.date.slice(0,7)===m).reduce((s,t)=>s+num(t.amount),0)+st.events.filter(e=>e.status==='received'&&e.accountId&&e.payDate?.slice(0,7)===m).reduce((s,e)=>s+payoutNet(e),0))}
 function monthExpense(m){return round(st.transactions.filter(t=>t.type==='expense'&&t.date.slice(0,7)===m).reduce((s,t)=>s+num(t.amount),0)+st.purchases.reduce((s,p)=>s+installment(p,m),0))}
 function accOptions(){return options(st.accounts,'name')}
-function setView(v){currentView=v;searchTerm='';transKindFilter='all';render()}
+function setView(v){currentView=v;searchTerm='';transKindFilter='all';cardSelected.clear();render()}
 function topbar(name,desc,buttons='',monthly=false){$('#pageTitle').textContent=name;$('#pageDesc').textContent=desc;$('#pageSubtitle').textContent=currentView==='home'?'VISÃO FINANCEIRA':'LUME • OFFLINE';$('#pageActions').innerHTML=(monthly?`<div class="period"><button data-action="previous-month" aria-label="Mês anterior">‹</button><span>${esc(formatMonth(month))}</span><button data-action="next-month" aria-label="Próximo mês">›</button></div>`:'')+buttons;}
 function renderNav(){const nav=viewItems.map(([id,ic,n])=>`<button data-view="${id}" class="${currentView===id?'active':''}" type="button"><i class="ico">${ic}</i><span class="navtext">${n}</span></button>`).join('');$('#navDesktop').innerHTML=nav;$('#navMobile').innerHTML=viewItems.map(([id,ic,n])=>`<button data-view="${id}" class="${currentView===id?'active':''}" type="button"><i class="ico">${ic}</i><span>${id==='transactions'?'Lanç.':id==='assets'?'Ativos':id==='payouts'?'Prov.':n}</span></button>`).join('')}
 function empty(title,sub){return `<div class="empty"><b>${title}</b>${sub}</div>`}
-function entry(icon,css,title,meta,amt,side='',actions=''){return `<div class="entry"><span class="avatar ${css}">${icon}</span><div class="info"><div class="title">${title}</div><div class="meta">${meta}</div></div><div class="amount">${amt}${side?`<small>${side}</small>`:''}</div>${actions?`<div class="row-buttons">${actions}</div>`:''}</div>`}
+function entry(icon,css,title,meta,amt,side='',actions='',lead='',cls=''){return `<div class="entry${cls?' '+cls:''}">${lead}<span class="avatar ${css}">${icon}</span><div class="info"><div class="title">${title}</div><div class="meta">${meta}</div></div><div class="amount">${amt}${side?`<small>${side}</small>`:''}</div>${actions?`<div class="row-buttons">${actions}</div>`:''}</div>`}
 const ed=(what,id)=>`<button type="button" class="mini-act" data-action="edit-${what}" data-id="${esc(id)}" title="Editar">✎</button><button type="button" class="mini-act" data-action="remove-${what}" data-id="${esc(id)}" title="Excluir">×</button>`;
 function txIcon(t){return t.type==='income'?['↙','income']:t.type==='expense'?['↗','expense']:['⇄','']}
 function txEntry(t,withEdit=false){const [icon,c]=txIcon(t);return entry(icon,c,esc(t.description),`${formatDate(t.date)} · ${esc(t.category||'Transferência')} · ${bankMark(byId('accounts',t.accountId),true)}${esc(accountName(t.accountId))}${t.type==='transfer'?' → '+esc(accountName(t.toAccountId)):''}`,`<span class="${t.type==='income'?'green':t.type==='expense'?'red':'blue'}">${t.type==='income'?'+':t.type==='expense'?'−':''}${fmt(t.amount)}</span>`,'',withEdit?ed('transaction',t.id):'')}
@@ -131,9 +138,49 @@ function cards(){topbar('Cartões de crédito','Controle faturas e compras parce
  const ranked=[...totals.entries()].sort((a,b)=>b[1]-a[1]);
  h+=`<section class="panel" style="margin-top:16px"><div class="panel-head"><h2>Gastos por categoria • ${esc(formatMonth(cardMonth))}</h2><b>${fmt(grandTotal)}</b></div>${ranked.length?`<div class="grid g2eq">${ranked.map(([name,value])=>`<div style="padding:10px 2px"><div class="split"><span>${esc(name)}</span><b>${fmt(value)}</b></div><div class="progress"><i style="width:${grandTotal>0?Math.min(100,value/grandTotal*100):0}%"></i></div><div class="sub">${grandTotal>0?(value/grandTotal*100).toFixed(1).replace('.',','):'0'}% das faturas do mês</div></div>`).join('')}</div>`:empty('Ainda não há compras nesta fatura','Importe um PDF ou CSV, ou cadastre compras manualmente.')}</section>`;
  const categoryList=[...new Set(st.purchases.map(p=>p.category||'Outros'))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
- const all=st.purchases.filter(p=>st.cards.some(c=>c.id===p.cardId)&&(cardCategoryFilter==='all'||(p.category||'Outros')===cardCategoryFilter)).sort((a,b)=>b.date.localeCompare(a.date));
- h+=`<section class="panel" style="margin-top:16px"><div class="panel-head"><h2>Compras registradas</h2><select id="cardCategoryFilter" aria-label="Filtrar categoria" style="max-width:200px"><option value="all">Todas as categorias</option>${categoryList.map(c=>`<option value="${esc(c)}" ${cardCategoryFilter===c?'selected':''}>${esc(c)}</option>`).join('')}</select></div>${all.length?all.map(p=>entry('▤','',esc(p.description),`${esc(cardName(p.cardId))} · <span class="tag">${esc(p.category||'Outros')}</span> · ${esc(p.installments)}x a partir de ${esc(formatMonth(p.firstMonth))}`,fmt(p.total),'Valor da compra',ed('purchase',p.id))).join(''):empty('Nenhuma compra nesta categoria','Troque o filtro ou cadastre uma compra.')}</section>`;
-const pay=st.payments.filter(x=>x.month===cardMonth).slice().sort((a,b)=>b.date.localeCompare(a.date));if(pay.length)h+=`<section class="panel" style="margin-top:16px"><h2>Pagamentos de faturas deste mês</h2>${pay.map(p=>entry('✓','income',esc(cardName(p.cardId)),`${formatDate(p.date)} · ${esc(accountName(p.accountId))}`,fmt(p.amount),'Pagamento efetuado',`<button class="mini-act" data-action="remove-payment" data-id="${esc(p.id)}">×</button>`)).join('')}</section>`;h+=`<section class="panel" style="margin-top:16px"><div class="panel-head"><h2>Classificação automática</h2><button class="btn small secondary" data-action="manage-category-rules">⚙ Regras de categorias</button></div><div class="sub">Mais de 200 regras automáticas (iFood, Uber/99, Líder, Mateus, Assaí, drogarias, Vivo/TIM, Equatorial, cursos e concursos…). Suas regras pessoais têm prioridade.</div><div class="block-actions" style="margin-top:12px"><button class="btn small" data-action="categorize-older-purchases">Reclassificar registros com categoria genérica</button></div></section>`;h+=`<div class="note" style="margin-top:16px">Informe o <b>mês da primeira fatura</b> ao cadastrar uma compra. O aplicativo distribui as parcelas pelos meses seguintes. O dia de fechamento é exibido como referência, mas não calcula automaticamente a competência.</div>`;$('#app').innerHTML=h;}
+ const dupGroups=storedPurchaseDuplicates(),dupMode=cardCategoryFilter==='__dups';
+ const all=dupMode?dupGroups.flat():st.purchases.filter(p=>st.cards.some(c=>c.id===p.cardId)&&(cardCategoryFilter==='all'||(p.category||'Outros')===cardCategoryFilter)).sort((a,b)=>b.date.localeCompare(a.date));
+ // Seleção múltipla: mantém só ids ainda visíveis.
+ {const visible=new Set(all.map(p=>p.id));for(const id of [...cardSelected])if(!visible.has(id))cardSelected.delete(id);}
+ const purchaseRow=p=>{const on=cardSelected.has(p.id);return entry('▤','',esc(p.description),`${formatDate(p.date)} · ${esc(cardName(p.cardId))} · <span class="tag">${esc(p.category||'Outros')}</span> · ${esc(p.installments)}x a partir de ${esc(formatMonth(p.firstMonth))}`,fmt(p.total),'Valor da compra',ed('purchase',p.id),`<input type="checkbox" class="sel-box" data-select-purchase="${esc(p.id)}" ${on?'checked':''} aria-label="Selecionar ${esc(p.description)}">`,on?'selected':'')};
+ const list=dupMode?(dupGroups.length?dupGroups.map(g=>`<div class="dup-group"><div class="sub">⚠ ${g.length} registros iguais · ${formatDate(g[0].date)} · ${fmt(g[0].total)}</div>${g.map(purchaseRow).join('')}</div>`).join(''):empty('Nenhuma duplicada encontrada','Não há compras repetidas (mesmo cartão, data, valor e descrição parecida).')):(all.length?all.map(purchaseRow).join(''):empty('Nenhuma compra nesta categoria','Troque o filtro ou cadastre uma compra.'));
+ const extraCount=dupGroups.reduce((n,g)=>n+g.length-1,0);
+ h+=`<section class="panel" style="margin-top:16px"><div class="panel-head"><h2>Compras registradas</h2><select id="cardCategoryFilter" aria-label="Filtrar categoria" style="max-width:220px"><option value="all">Todas as categorias</option>${dupGroups.length||dupMode?`<option value="__dups" ${dupMode?'selected':''}>⚠ Possíveis duplicadas (${extraCount})</option>`:''}${categoryList.map(c=>`<option value="${esc(c)}" ${cardCategoryFilter===c?'selected':''}>${esc(c)}</option>`).join('')}</select></div>${dupGroups.length&&!dupMode?`<div class="inv-warning" style="margin-bottom:10px">Encontramos <b>${extraCount}</b> compra(s) que parecem duplicadas. <button class="btn small" data-action="show-purchase-dups">Revisar duplicadas</button></div>`:''}${all.length?`<div class="bulkbar"><label><input type="checkbox" class="sel-box" id="selectAllPurchases" aria-label="Selecionar todas as compras exibidas"> <span id="selectAllLabel">Selecionar todas (${all.length})</span></label><div class="block-actions">${dupMode?`<button class="btn small" data-action="select-extra-dups" title="Seleciona tudo, menos o primeiro registro de cada grupo">Marcar cópias extras</button>`:''}<button class="btn small warn" data-action="delete-selected-purchases" id="deleteSelectedPurchases">Excluir selecionadas</button></div></div>`:''}<div id="purchaseRows">${list}</div></section>`;
+const pay=st.payments.filter(x=>x.month===cardMonth).slice().sort((a,b)=>b.date.localeCompare(a.date));if(pay.length)h+=`<section class="panel" style="margin-top:16px"><h2>Pagamentos de faturas deste mês</h2>${pay.map(p=>entry('✓','income',esc(cardName(p.cardId)),`${formatDate(p.date)} · ${esc(accountName(p.accountId))}`,fmt(p.amount),'Pagamento efetuado',`<button class="mini-act" data-action="remove-payment" data-id="${esc(p.id)}">×</button>`)).join('')}</section>`;h+=`<section class="panel" style="margin-top:16px"><div class="panel-head"><h2>Classificação automática</h2><button class="btn small secondary" data-action="manage-category-rules">⚙ Regras de categorias</button></div><div class="sub">Mais de 200 regras automáticas (iFood, Uber/99, Líder, Mateus, Assaí, drogarias, Vivo/TIM, Equatorial, cursos e concursos…). Suas regras pessoais têm prioridade.</div><div class="block-actions" style="margin-top:12px"><button class="btn small" data-action="categorize-older-purchases">Reclassificar registros com categoria genérica</button></div></section>`;h+=`<div class="note" style="margin-top:16px">Informe o <b>mês da primeira fatura</b> ao cadastrar uma compra. O aplicativo distribui as parcelas pelos meses seguintes. O dia de fechamento é exibido como referência, mas não calcula automaticamente a competência.</div>`;$('#app').innerHTML=h;syncPurchaseSelection();}
+function visiblePurchaseBoxes(){return $$('#purchaseRows [data-select-purchase]')}
+function syncPurchaseSelection(){
+ const boxes=visiblePurchaseBoxes(),n=boxes.filter(b=>b.checked).length;
+ boxes.forEach(b=>b.closest('.entry')?.classList.toggle('selected',b.checked));
+ const all=$('#selectAllPurchases');if(all){all.checked=boxes.length>0&&n===boxes.length;all.indeterminate=n>0&&n<boxes.length;}
+ const btn=$('#deleteSelectedPurchases');if(btn){btn.disabled=n===0;btn.textContent=n?`Excluir selecionadas (${n})`:'Excluir selecionadas';}
+ const lbl=$('#selectAllLabel');if(lbl)lbl.textContent=n?`${n} de ${boxes.length} selecionada(s)`:`Selecionar todas (${boxes.length})`;
+}
+function deleteSelectedPurchases(){
+ const ids=new Set(cardSelected),items=st.purchases.filter(p=>ids.has(p.id));if(!items.length)return;
+ const total=round(items.reduce((s,p)=>s+num(p.total),0));
+ if(!confirm(`Excluir ${items.length} compra(s), somando ${fmt(total)}?\nEssa ação não pode ser desfeita.`))return;
+ cardSelected.clear();mutate(()=>{st.purchases=st.purchases.filter(p=>!ids.has(p.id))});
+}
+// Compras já salvas que parecem repetidas: mesmo cartão, data, valor, nº de parcelas (e mesma parcela "2/10"), com descrição parecida.
+function storedPurchaseDuplicates(){
+ const buckets=new Map();
+ for(const p of st.purchases){
+  if(!st.cards.some(c=>c.id===p.cardId))continue;
+  const d=dupDescription(p.description),k=JSON.stringify([p.cardId,p.date,Math.round(num(p.total)*100),Number(p.installments||1),d.portion,d.portion?p.firstMonth:'']);
+  if(!buckets.has(k))buckets.set(k,[]);buckets.get(k).push({p,base:d.base});
+ }
+ const groups=[];
+ for(const list of buckets.values()){
+  if(list.length<2)continue;
+  const used=new Set();
+  for(let i=0;i<list.length;i++){
+   if(used.has(i))continue;const g=[list[i].p];used.add(i);
+   for(let j=i+1;j<list.length;j++)if(!used.has(j)&&similarDescription(list[i].base,list[j].base)){g.push(list[j].p);used.add(j);}
+   if(g.length>1)groups.push(g);
+  }
+ }
+ return groups.sort((a,b)=>b[0].date.localeCompare(a[0].date));
+}
 function assets(){topbar('Investimentos','Ações e FIIs com posições e preços informados por você.',`<button class="btn" data-action="quote-token">Chave de API</button><button class="btn secondary" data-action="quotes">↻ Atualizar cotações</button><button class="btn primary" data-action="new-asset">+ Adicionar ativo</button>`);const stock=st.assets.filter(a=>a.type==='stock'),fiis=st.assets.filter(a=>a.type==='fii');const known=st.assets.reduce((n,a)=>n+num(a.quantity)*num(a.avgPrice),0);const priced=st.assets.filter(a=>num(a.price)>0);const pricedPnL=priced.reduce((n,a)=>n+assetResult(a).profit,0);const pricedCost=priced.reduce((n,a)=>n+assetResult(a).cost,0);let h=`<div class="grid kpis"><div class="tile"><div class="klabel">Patrimônio em ativos</div><div class="kvalue">${fmt(portfolioValue())}</div><div class="ksub">Preço de referência manual</div></div><div class="tile"><div class="klabel">Custo estimado</div><div class="kvalue">${fmt(known)}</div><div class="ksub">Quantidade × preço médio</div></div><div class="tile"><div class="klabel">Lucro / prejuízo (cotados)</div><div class="kvalue ${pricedPnL>=0?'green':'red'}">${priced.length?fmt(pricedPnL):'—'}</div><div class="ksub">${pricedCost?rateFmt(pricedPnL/pricedCost):'Sem cotação'} · ${priced.length} ativo(s) com preço informado</div></div><div class="tile"><div class="klabel">Posições</div><div class="kvalue green">${stock.length+fiis.length}</div><div class="ksub">${stock.length} ações · ${fiis.length} FIIs</div></div></div>`;
 h+=`<section class="panel" style="margin-top:17px"><div class="toolbar"><h2 style="margin:0">Minha carteira</h2><select id="assetFilter" style="width:auto"><option value="all" ${assetFilter==='all'?'selected':''}>Todos</option><option value="stock" ${assetFilter==='stock'?'selected':''}>Ações</option><option value="fii" ${assetFilter==='fii'?'selected':''}>FIIs</option></select></div>`;const a=st.assets.filter(x=>assetFilter==='all'||x.type===assetFilter);h+=a.length?a.map(x=>{const r=assetResult(x);return entry(x.type==='fii'?'F':'A',x.type==='fii'?'fii':'stock',`${esc(x.ticker)} <span class="tag">${x.type==='fii'?'FII':'Ação'}</span>`,`${esc(x.quantity)} ${x.type==='fii'?'cotas':'ações'} · médio ${fmt(x.avgPrice)} · referência ${fmt(x.price||x.avgPrice)}${x.quotedAt?` · consulta ${new Date(x.quotedAt).toLocaleString('pt-BR')}`:' · manual/aproximação'}`,`${fmt(r.value)}<small style="display:block;color:${r.profit==null?'#a5abb7':r.profit>=0?'#76d9a8':'#f59b9b'}">${r.profit==null?'Sem cotação':`${r.profit>=0?'+':''}${fmt(r.profit)} (${r.percent>=0?'+':''}${(r.percent*100).toFixed(2).replace('.',',')}%)`}</small>`,`<button type="button" class="mini-act" data-action="buy-asset" data-id="${esc(x.id)}">+ Compra</button><button type="button" class="mini-act" data-action="new-payout" data-id="${esc(x.id)}">+ Provento</button>`,ed('asset',x.id))}).join(''):empty('Sua carteira está vazia','Adicione ticker, quantidade e preço médio.');h+=`</section><div class="note" style="margin-top:16px">Os preços podem ser informados <b>manualmente</b> ou atualizados via API brapi. O cálculo dos proventos usa os eventos cadastrados por você, e não identifica automaticamente anúncios da B3.</div>`;h+=`<div class="note" style="margin-top:16px">${esc(quoteStatus||'Cotações: valores manuais até a primeira consulta.')} • A consulta on-line pode exigir chave e está sujeita à disponibilidade do provedor. Os preços podem estar atrasados; consulte o horário de cada atualização.</div>`;$('#app').innerHTML=h;}
 function payouts(){topbar('Proventos','Agenda de dividendos, JCP e rendimentos de FIIs.',`<button class="btn primary" data-action="new-payout">+ Novo provento</button>`);let arr=st.events.slice().sort((a,b)=>a.payDate.localeCompare(b.payDate));const due=arr.filter(e=>e.status!=='received'&&e.payDate>=localToday()),received=arr.filter(e=>e.status==='received');const totalD=due.reduce((s,e)=>s+payoutNet(e),0),totalR=received.reduce((s,e)=>s+payoutNet(e),0);let h=`<div class="grid cards3"><div class="tile"><div class="klabel">A receber (agenda futura)</div><div class="kvalue green">${fmt(totalD)}</div><div class="ksub">Eventos cadastrados, não garantidos se estimados</div></div><div class="tile"><div class="klabel">Recebidos registrados</div><div class="kvalue">${fmt(totalR)}</div><div class="ksub">Todos os períodos</div></div><div class="tile"><div class="klabel">Eventos cadastrados</div><div class="kvalue purple">${arr.length}</div><div class="ksub">Nenhum anúncio buscado online</div></div></div><section class="panel" style="margin-top:17px"><div class="panel-head"><h2>Agenda de pagamentos</h2></div>`;
@@ -616,8 +663,10 @@ function invoicePortion(description){
 }
 function invoiceMatchesExisting(rows,cardId,billMonth){
  const purchases=st.purchases.filter(p=>p.cardId===cardId&&(p.firstMonth===billMonth||(Number(p.installments)>1&&monthsBetween(p.firstMonth,billMonth)>=0&&monthsBetween(p.firstMonth,billMonth)<Number(p.installments))));
+ // Compras do mesmo cartão em faturas próximas (±2 meses): pega importações feitas com o mês errado.
+ const nearby=st.purchases.filter(p=>p.cardId===cardId&&p.firstMonth&&(Math.abs(monthsBetween(p.firstMonth,billMonth))<=2||(Number(p.installments)>1&&monthsBetween(p.firstMonth,billMonth)>=0&&monthsBetween(p.firstMonth,billMonth)<Number(p.installments))));
  const consumed=new Set();
- return rows.map((r,i)=>{
+ const exactFor=(r,i)=>{
   const original=invoiceRows[i]||r;
   const originalKey=invoicePurchaseKey(original,cardId,billMonth);
   const editedKey=invoicePurchaseKey(r,cardId,billMonth);
@@ -640,10 +689,49 @@ function invoiceMatchesExisting(rows,cardId,billMonth){
    if(ix<0||ix>=Number(p.installments)||part.current!==ix+1)return false;
    return p.date===r.date&&normalizeInvText(p.description)===part.base&&Math.abs(installment(p,billMonth)-Number(r.amount))<0.005;
   });
-  if(found)consumed.add(found.id);
-  return !!found;
+  // Compra à vista já importada em outra fatura (mês escolhido errado): mesma data, descrição e valor.
+  // Não vale para parcelas ("2/10"), que se repetem legitimamente em faturas diferentes.
+  if(!found&&!sourcePortion&&!editedPortion){
+   const strip=item=>JSON.stringify([item.date,normalizeInvText(item.description),Math.round(Number(item.amount)*100)]);
+   const keys=new Set([strip(original),strip(r)]);
+   found=nearby.find(p=>!consumed.has(p.id)&&Number(p.installments||1)===1&&p.firstMonth!==billMonth&&!invoicePortion(p.description)&&keys.has(strip({date:p.date,description:p.description,amount:num(p.total)})));
+  }
+  return found||null;
+ };
+ // 1ª passada: duplicadas exatas (bloqueadas). Feita para todas as linhas antes das prováveis,
+ // para que uma linha "parecida" não consuma a compra que corresponde exatamente a outra linha.
+ const result=rows.map((r,i)=>{const found=exactFor(r,i);if(found){consumed.add(found.id);return {kind:'exact',match:found};}return null;});
+ // 2ª passada: possíveis duplicadas (desmarcadas, mas liberadas para o usuário decidir).
+ return result.map((res,i)=>{
+  if(res)return res;
+  const r=rows[i],original=invoiceRows[i]||r,rowDesc=dupDescription(r.description),origDesc=dupDescription(original.description),cents=Math.round(Number(r.amount)*100);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(r.date||'')||!Number.isFinite(cents))return null;
+  const found=nearby.find(p=>{
+   if(consumed.has(p.id))return false;
+   const n=Number(p.installments||1),ix=monthsBetween(p.firstMonth,billMonth);
+   const value=n>1?installment(p,billMonth):num(p.total);
+   if(Math.round(value*100)!==cents||dayDiff(p.date,r.date)>3)return false;
+   const pd=dupDescription(p.description);
+   if(rowDesc.portion||pd.portion){if(rowDesc.portion!==pd.portion||(n===1&&p.firstMonth!==billMonth))return false;}
+   else if(n>1){if(ix<0||ix>=n)return false;}
+   return similarDescription(pd.base,rowDesc.base)||similarDescription(pd.base,origDesc.base);
+  });
+  if(found){consumed.add(found.id);return {kind:'probable',match:found};}
+  return null;
  });
 }
+function dupDescription(desc){const p=invoicePortion(desc);return p?{base:p.base,portion:`${p.current}/${p.total}`}:{base:normalizeInvText(desc),portion:''}}
+// Descrições parecidas: iguais, uma contida na outra, ou com a maioria das palavras em comum.
+function similarDescription(a,b){
+ if(!a||!b)return false;if(a===b)return true;
+ const ca=a.replace(/ /g,''),cb=b.replace(/ /g,'');if(ca===cb)return true;
+ if(Math.min(ca.length,cb.length)>=5&&(ca.includes(cb)||cb.includes(ca)))return true;
+ const ta=new Set(a.split(' ').filter(w=>w.length>1&&!/^\d+$/.test(w))),tb=new Set(b.split(' ').filter(w=>w.length>1&&!/^\d+$/.test(w)));
+ if(!ta.size||!tb.size)return false;
+ let common=0;for(const w of ta)if(tb.has(w))common++;
+ return common>0&&(common/Math.min(ta.size,tb.size)>=0.75||common/(ta.size+tb.size-common)>=0.5);
+}
+function dayDiff(a,b){const x=Date.parse(a+'T12:00:00'),y=Date.parse(b+'T12:00:00');return Number.isFinite(x)&&Number.isFinite(y)?Math.abs(x-y)/864e5:Infinity}
 function invoiceEditedRows(){
  return $$('#invoiceRows tr').map(tr=>{
   const original=invoiceRows[Number(tr.dataset.invIndex)];
@@ -653,17 +741,24 @@ function invoiceEditedRows(){
 function updateInvoiceReview(){
  if(!invoiceMeta||!$('#invoiceRows'))return;
  const rows=invoiceEditedRows(),duplicates=invoiceMatchesExisting(rows,invoiceMeta.cardId,invoiceMeta.billMonth);
- let newcomers=0,selected=0,ignored=0;
+ let newcomers=0,selected=0,ignored=0,probable=0;
  $$('#invoiceRows tr').forEach((tr,i)=>{
-  const checkbox=tr.querySelector('.invoice-select'),wasDuplicate=tr.dataset.invDuplicate==='1',duplicate=duplicates[i];
-  if(duplicate){ignored++;checkbox.checked=false;checkbox.disabled=true;}
-  else{newcomers++;checkbox.disabled=false;if(wasDuplicate)checkbox.checked=true;if(checkbox.checked)selected++;}
-  tr.dataset.invDuplicate=duplicate?'1':'0';
-  tr.style.opacity=duplicate?'.68':'1';
-  tr.querySelector('.inv-row-label').innerHTML=duplicate?'<span class="tag dim">✓ Já incluída</span>':(rows[i].portion?`<span class="tag good">Nova · Parcela ${esc(rows[i].portion)}</span>`:'<span class="tag good">Nova compra</span>');
+  const checkbox=tr.querySelector('.invoice-select'),prev=tr.dataset.invState||'',d=duplicates[i],state=d?d.kind:'new';
+  if(state==='exact'){ignored++;checkbox.checked=false;checkbox.disabled=true;}
+  else{
+   newcomers++;checkbox.disabled=false;
+   // Ao mudar de estado, aplica o padrão: nova = marcada, possível duplicada = desmarcada. Depois respeita a escolha do usuário.
+   if(prev!==state)checkbox.checked=state==='new';
+   if(state==='probable')probable++;
+   if(checkbox.checked)selected++;
+  }
+  tr.dataset.invState=state;
+  tr.style.opacity=state==='exact'?'.68':'1';
+  const m=d?.match,where=m?`${esc(m.description)} · ${formatDate(m.date)} · ${fmt(Number(m.installments||1)>1?installment(m,invoiceMeta.billMonth):m.total)}${m.firstMonth!==invoiceMeta.billMonth?` · fatura de ${esc(formatMonth(m.firstMonth))}`:''}`:'';
+  tr.querySelector('.inv-row-label').innerHTML=state==='exact'?`<span class="tag dim" title="${where}">✓ Já incluída</span>${m.firstMonth!==invoiceMeta.billMonth?`<div class="sub">na fatura de ${esc(formatMonth(m.firstMonth))}</div>`:''}`:state==='probable'?`<span class="tag wait">⚠ Possível duplicada</span><div class="sub">Parecida com: ${where}</div>`:(rows[i].portion?`<span class="tag good">Nova · Parcela ${esc(rows[i].portion)}</span>`:'<span class="tag good">Nova compra</span>');
  });
  const toggle=$('#invoiceToggle');if(toggle){toggle.checked=newcomers>0&&selected===newcomers;toggle.indeterminate=selected>0&&selected<newcomers;toggle.disabled=newcomers===0;}
- const stats=$('#invoiceReviewStats');if(stats)stats.innerHTML=`<b class="green">${newcomers} nova(s)</b> · <b class="muted">${ignored} já incluída(s)</b> · ${selected} selecionada(s)`;
+ const stats=$('#invoiceReviewStats');if(stats)stats.innerHTML=`<b class="green">${newcomers-probable} nova(s)</b> · ${probable?`<b class="yellow">${probable} possível(is) duplicada(s), desmarcada(s), confira</b> · `:''}<b class="muted">${ignored} já incluída(s)</b> · ${selected} selecionada(s)`;
  const button=$('[data-action="confirm-invoice"]');if(button){button.disabled=selected===0;button.textContent=selected?`Importar ${selected} nova(s)`:'Nenhuma compra nova selecionada';}
 }
 function showInvoiceReview(){
@@ -687,7 +782,7 @@ function confirmInvoiceImport(){
  const selected=[];
  for(const tr of $$('#invoiceRows tr')){
   const i=Number(tr.dataset.invIndex),item=rows[i];
-  if(!tr.querySelector('.invoice-select').checked||duplicates[i])continue;
+  if(!tr.querySelector('.invoice-select').checked||duplicates[i]?.kind==='exact')continue;
   if(!/^\d{4}-\d{2}-\d{2}$/.test(item.date)||!item.description||!Number.isFinite(item.amount)||item.amount<=0){invoiceStatus('Confira data, descrição e valor de cada linha selecionada.',true);return;}
   const original=invoiceRows[i];
   const fingerprint=invoicePurchaseKey(original,cardId,billMonth);
@@ -695,7 +790,7 @@ function confirmInvoiceImport(){
   selected.push({...item,amount:round(item.amount),pdfFingerprint:fingerprint,pdfImportKey:`inter:v2:${fingerprint}:${ordinal}`});
  }
  if(!selected.length){invoiceStatus('Não há compras novas selecionadas. Os registros existentes permanecem inalterados.');updateInvoiceReview();return;}
- const ignored=duplicates.filter(Boolean).length,total=round(selected.reduce((a,b)=>a+b.amount,0));
+ const ignored=duplicates.filter(d=>d?.kind==='exact').length+duplicates.filter((d,i)=>d?.kind==='probable'&&!$(`#invoiceRows tr[data-inv-index="${i}"] .invoice-select`)?.checked).length,total=round(selected.reduce((a,b)=>a+b.amount,0));
  if(!confirm(`Importar ${selected.length} compra(s) nova(s) na fatura de ${formatMonth(billMonth)}, somando ${fmt(total)}?\n${ignored} compra(s) já existente(s) serão ignoradas.`))return;
  cardMonth=billMonth;mutate(()=>{for(const p of selected)st.purchases.push({id:uid(),cardId,date:p.date,description:p.description,category:p.category||categoryForDescription(p.description),total:p.amount,installments:1,firstMonth:billMonth,pdfImportKey:p.pdfImportKey,pdfFingerprint:p.pdfFingerprint});});
  closeInvoice();alert(`${selected.length} compra(s) nova(s) importada(s). ${ignored} já existente(s) ignorada(s), sem duplicar valores.`);
@@ -772,8 +867,8 @@ async function exportData(){
 async function importData(file){if(!file)return;if(file.size>10*1024*1024){alert('O backup é maior que 10 MB.');return;}return importText(await file.text());}
 function importText(text){let data;try{data=JSON.parse(String(text).trim())}catch(e){alert('Não foi possível ler o JSON. Confira se copiou o conteúdo inteiro, do { inicial ao } final.');return false;}const arrays=['accounts','transactions','cards','purchases','payments','assets','events'];const more=['otherAssets','liabilities','goals','snapshots','recurrences','recurrenceExceptions','categoryRules'];if(!data||data.version!==VERSION||!arrays.every(k=>Array.isArray(data[k]))||arrays.some(k=>data[k].length>100000||data[k].some(x=>!x||typeof x!=='object'||!x.id))){alert('Backup inválido ou versão incompatível. Nenhuma informação foi alterada.');return;}if(!confirm('Restaurar backup? Todos os dados atuais serão substituídos pelos registros do arquivo.'))return;st={...fresh(),...Object.fromEntries([...arrays,...more].map(k=>[k,Array.isArray(data[k])?data[k]:[]]))};{const now=Date.now();st._del={};for(const k of Object.keys(st))if(Array.isArray(st[k]))for(const x of st[k])if(x&&typeof x==='object')x._u=x._u||now;}save();setView('home');alert('Backup restaurado.');}
 function reset(){if(!confirm('Tem certeza? Isso apagará todos os dados deste aplicativo neste navegador.'))return;const s=prompt('Digite APAGAR para confirmar:');if(s!=='APAGAR')return;{const now=Date.now(),del={...(st._del||{})};for(const k of Object.keys(st))if(Array.isArray(st[k]))for(const x of st[k])if(x&&x.id)del[k+':'+x.id]=now;st=fresh();st._del=del;}save();setView('home');}
-function actions(e){const nav=e.target.closest('[data-view]');if(nav){setView(nav.dataset.view);return}const button=e.target.closest('[data-action]');if(!button)return;const act=button.dataset.action,id=button.dataset.id;if(act==='previous-month'){month=monthAdd(month,-1);render()}else if(act==='next-month'){month=monthAdd(month,1);render()}else if(act==='previous-cardmonth'){cardMonth=monthAdd(cardMonth,-1);render()}else if(act==='next-cardmonth'){cardMonth=monthAdd(cardMonth,1);render()}else if(act==='new-account')editAccount();else if(act==='new-transaction')editTransaction();else if(act==='new-recurrence')editRecurrence();else if(act==='settle-recurrence')settleRecurrence(id,button.dataset.date);else if(act==='undo-recurrence')undoRecurrence(id,button.dataset.date);else if(act==='edit-occurrence')editOccurrence(id,button.dataset.date);else if(act==='delete-occurrence')deleteOccurrence(id,button.dataset.date);else if(act==='import-invoice')openInvoiceImporter();else if(act==='choose-invoice-file')$('#invoiceFile').click();else if(act==='read-invoice-file')readInvoiceFile();else if(act==='process-invoice-csv')processInvoiceCsv();else if(act==='manage-category-rules')manageCategoryRules();else if(act==='categorize-older-purchases')categorizeOlderPurchases();else if(act==='remove-category-rule'){if(confirm('Excluir esta regra pessoal de classificação?')){mutate(()=>{st.categoryRules=st.categoryRules.filter(r=>r.id!==id)});if($('#modal').open)closeModal();}}else if(act==='cancel-invoice')closeInvoice();else if(act==='confirm-invoice')confirmInvoiceImport();else if(act==='new-card')editCard();else if(act==='new-purchase')editPurchase(null,id);else if(act==='pay-bill')payBill(id);else if(act==='new-asset')editAsset();else if(act==='buy-asset')buyAsset(id);else if(act==='new-payout')editPayout(null,id);else if(act==='new-other')editOther();else if(act==='new-debt')editDebt();else if(act==='new-goal')editGoal();else if(act==='snapshot')saveSnapshot();else if(act==='quotes')updateQuotes();else if(act==='quote-token')tokenModal();else if(act==='export')exportData();else if(act==='import')$('#importFile').click();else if(act==='paste-import')openModal('Colar backup JSON',`<div class="field full"><div class="note">Cole aqui todo o conteúdo do backup (use “Copiar JSON” na versão antiga do Lume). Os dados atuais deste aparelho serão substituídos.</div></div><div class="field full"><textarea name="json" id="f_json" style="width:100%;height:220px;font-family:monospace;font-size:11px" required></textarea></div>`,f=>{if(importText(val(f,'json'))===false)throw Error('JSON inválido.');},'Restaurar');else if(act==='reset')reset();else if(act.startsWith('edit-')){const type=act.slice(5);({account:editAccount,transaction:editTransaction,recurrence:editRecurrence,card:editCard,purchase:editPurchase,asset:editAsset,payout:editPayout,other:editOther,debt:editDebt,goal:editGoal}[type])?.(id)}else if(act.startsWith('remove-'))removeItem(act.slice(7),id)}
-document.addEventListener('click',actions);document.addEventListener('input',e=>{if(e.target?.id==='txSearch'){searchTerm=e.target.value;const a=st.transactions.filter(t=>t.date.slice(0,7)===month&&(transKindFilter==='all'||t.type===transKindFilter)&&((t.description+' '+(t.category||'')).toLowerCase().includes(searchTerm.toLowerCase()))).sort((a,b)=>b.date.localeCompare(a.date));$('#transactionsRows').innerHTML=a.length?a.map(t=>txEntry(t,true)).join(''):empty('Sem resultados','Tente outra busca.');}});document.addEventListener('change',e=>{if(e.target?.id==='txType'){transKindFilter=e.target.value;render()}else if(e.target?.id==='assetFilter'){assetFilter=e.target.value;render()}else if(e.target?.id==='cardCategoryFilter'){cardCategoryFilter=e.target.value;render()}});
+function actions(e){const nav=e.target.closest('[data-view]');if(nav){setView(nav.dataset.view);return}const button=e.target.closest('[data-action]');if(!button)return;const act=button.dataset.action,id=button.dataset.id;if(act==='previous-month'){month=monthAdd(month,-1);render()}else if(act==='next-month'){month=monthAdd(month,1);render()}else if(act==='previous-cardmonth'){cardMonth=monthAdd(cardMonth,-1);render()}else if(act==='next-cardmonth'){cardMonth=monthAdd(cardMonth,1);render()}else if(act==='delete-selected-purchases')deleteSelectedPurchases();else if(act==='show-purchase-dups'){cardCategoryFilter='__dups';cardSelected.clear();render()}else if(act==='select-extra-dups'){cardSelected.clear();for(const g of storedPurchaseDuplicates())for(const p of g.slice(1))cardSelected.add(p.id);visiblePurchaseBoxes().forEach(b=>b.checked=cardSelected.has(b.dataset.selectPurchase));syncPurchaseSelection()}else if(act==='new-account')editAccount();else if(act==='new-transaction')editTransaction();else if(act==='new-recurrence')editRecurrence();else if(act==='settle-recurrence')settleRecurrence(id,button.dataset.date);else if(act==='undo-recurrence')undoRecurrence(id,button.dataset.date);else if(act==='edit-occurrence')editOccurrence(id,button.dataset.date);else if(act==='delete-occurrence')deleteOccurrence(id,button.dataset.date);else if(act==='import-invoice')openInvoiceImporter();else if(act==='choose-invoice-file')$('#invoiceFile').click();else if(act==='read-invoice-file')readInvoiceFile();else if(act==='process-invoice-csv')processInvoiceCsv();else if(act==='manage-category-rules')manageCategoryRules();else if(act==='categorize-older-purchases')categorizeOlderPurchases();else if(act==='remove-category-rule'){if(confirm('Excluir esta regra pessoal de classificação?')){mutate(()=>{st.categoryRules=st.categoryRules.filter(r=>r.id!==id)});if($('#modal').open)closeModal();}}else if(act==='cancel-invoice')closeInvoice();else if(act==='confirm-invoice')confirmInvoiceImport();else if(act==='new-card')editCard();else if(act==='new-purchase')editPurchase(null,id);else if(act==='pay-bill')payBill(id);else if(act==='new-asset')editAsset();else if(act==='buy-asset')buyAsset(id);else if(act==='new-payout')editPayout(null,id);else if(act==='new-other')editOther();else if(act==='new-debt')editDebt();else if(act==='new-goal')editGoal();else if(act==='snapshot')saveSnapshot();else if(act==='quotes')updateQuotes();else if(act==='quote-token')tokenModal();else if(act==='export')exportData();else if(act==='import')$('#importFile').click();else if(act==='paste-import')openModal('Colar backup JSON',`<div class="field full"><div class="note">Cole aqui todo o conteúdo do backup (use “Copiar JSON” na versão antiga do Lume). Os dados atuais deste aparelho serão substituídos.</div></div><div class="field full"><textarea name="json" id="f_json" style="width:100%;height:220px;font-family:monospace;font-size:11px" required></textarea></div>`,f=>{if(importText(val(f,'json'))===false)throw Error('JSON inválido.');},'Restaurar');else if(act==='reset')reset();else if(act.startsWith('edit-')){const type=act.slice(5);({account:editAccount,transaction:editTransaction,recurrence:editRecurrence,card:editCard,purchase:editPurchase,asset:editAsset,payout:editPayout,other:editOther,debt:editDebt,goal:editGoal}[type])?.(id)}else if(act.startsWith('remove-'))removeItem(act.slice(7),id)}
+document.addEventListener('click',actions);document.addEventListener('input',e=>{if(e.target?.id==='txSearch'){searchTerm=e.target.value;const a=st.transactions.filter(t=>t.date.slice(0,7)===month&&(transKindFilter==='all'||t.type===transKindFilter)&&((t.description+' '+(t.category||'')).toLowerCase().includes(searchTerm.toLowerCase()))).sort((a,b)=>b.date.localeCompare(a.date));$('#transactionsRows').innerHTML=a.length?a.map(t=>txEntry(t,true)).join(''):empty('Sem resultados','Tente outra busca.');}});document.addEventListener('change',e=>{if(e.target?.id==='txType'){transKindFilter=e.target.value;render()}else if(e.target?.id==='assetFilter'){assetFilter=e.target.value;render()}else if(e.target?.id==='cardCategoryFilter'){cardCategoryFilter=e.target.value;cardSelected.clear();render()}else if(e.target?.dataset?.selectPurchase){e.target.checked?cardSelected.add(e.target.dataset.selectPurchase):cardSelected.delete(e.target.dataset.selectPurchase);syncPurchaseSelection()}else if(e.target?.id==='selectAllPurchases'){const on=e.target.checked;visiblePurchaseBoxes().forEach(b=>{b.checked=on;on?cardSelected.add(b.dataset.selectPurchase):cardSelected.delete(b.dataset.selectPurchase)});syncPurchaseSelection()}});
 $('#modalForm').addEventListener('submit',e=>{e.preventDefault();if(!modalSave)return;try{modalSave(e.currentTarget);closeModal()}catch(err){$('#modalError').textContent=err?.message||'Verifique os dados preenchidos.';$('#modalError').style.display='block';}});$('#closeModal').addEventListener('click',closeModal);$('#cancelModal').addEventListener('click',closeModal);$('#modal').addEventListener('click',e=>{if(e.target===$('#modal'))closeModal()});$('#invoiceClose').addEventListener('click',closeInvoice);$('#invoiceDialog').addEventListener('close',()=>{invoiceFile=null;invoiceRows=[];invoiceMeta=null;invoiceCsvData=null;});$('#invoiceDialog').addEventListener('click',e=>{if(e.target===$('#invoiceDialog'))closeInvoice()});$('#invoiceFile').addEventListener('change',e=>{const f=e.target.files?.[0];if(!f)return;const pdf=/\.pdf$/i.test(f.name)||f.type==='application/pdf',csv=/\.csv$/i.test(f.name)||f.type==='text/csv';if(f.size>15*1024*1024){invoiceStatus('Arquivo maior que 15 MB. Selecione outro.',true);return;}if(!pdf&&!csv){invoiceStatus('Selecione um arquivo PDF ou CSV.',true);return;}invoiceFile=f;invoiceCsvData=null;const el=$('#invoicePicked');if(el)el.textContent=f.name+' • '+(f.size/1024).toFixed(0)+' KB';const pw=$('#invoicePassword')?.closest('.field');if(pw)pw.style.display=csv?'none':'';invoiceStatus(csv?'CSV selecionado. Clique em Ler fatura para conferir as colunas.':'PDF selecionado. Informe a senha, se necessário, e clique em Ler fatura.');});$('#importFile').addEventListener('change',async e=>{await importData(e.target.files?.[0]);e.target.value=''});
 window.LumeApp={KEY,getState:()=>st,fresh,replaceState(n){st={...fresh(),...n};if(!st._del)st._del={};try{localStorage.setItem(KEY,JSON.stringify(st))}catch(_){}render();},backupText:()=>backupPayload(),esc};
 read();if(!st._del)st._del={};render();
