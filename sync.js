@@ -20,7 +20,7 @@
     set(k, v) { try { localStorage.setItem(k, v); } catch (_) {} },
     del(k) { try { localStorage.removeItem(k); } catch (_) {} },
   };
-  let tokenClient = null, gisPromise = null, syncing = false, timer = null, status = '', statusKind = 'idle', applyingRemote = false;
+  let tokenClient = null, gisPromise = null, syncing = false, again = false, timer = null, status = '', statusKind = 'idle', applyingRemote = false;
 
   const app = () => window.LumeApp;
   const clientId = () => (ls.get(LS_CLIENT) || '').trim();
@@ -120,27 +120,36 @@
       if (!interactive) { setStatus('Toque para sincronizar', 'wait'); return; }
       try { tk = await requestToken(connected() ? '' : 'consent'); } catch (e) { setStatus(e.message, 'bad'); return; }
     }
-    syncing = true; setStatus('Sincronizando…', 'busy');
+    syncing = true; again = false; setStatus('Sincronizando…', 'busy');
     try {
-      const local = app().getState();
       const file = await findFile(tk, `name='${DATA_NAME}' and trashed=false`, 'appDataFolder');
-      let merged = local, remoteText = null;
+      let remote = null, remoteText = null;
       if (file) {
         remoteText = await (await drive(`${API}/files/${file.id}?alt=media`, {}, tk)).text();
-        let remote = null; try { remote = JSON.parse(remoteText); } catch (_) {}
-        if (remote && remote.version === local.version) merged = merge(local, remote);
+        try { remote = JSON.parse(remoteText); } catch (_) {}
       }
+      // Lê os dados locais só agora, depois da rede: assim nada que você alterou enquanto o
+      // download acontecia é sobrescrito pela mesclagem.
+      const local = app().getState();
+      if (remote && remote.version > local.version) throw Error('Os dados no Drive são de uma versão mais nova do Lume. Atualize o app neste aparelho.');
+      let merged = local;
+      if (remote && remote.version === local.version) merged = merge(local, remote);
       const mergedText = strip(merged);
       if (mergedText !== strip(local)) { applyingRemote = true; app().replaceState(merged); applyingRemote = false; }
       if (!file) await createFile(tk, { name: DATA_NAME, parents: ['appDataFolder'] }, mergedText, 'application/json');
       else if (mergedText !== remoteText) await updateFile(tk, file.id, mergedText);
-      ls.del(LS_DIRTY); ls.set(LS_LAST, String(Date.now()));
+      if (!again) ls.del(LS_DIRTY);
+      ls.set(LS_LAST, String(Date.now()));
       await dailyBackup(tk, merged).catch(e => console.warn('Backup diário', e));
       setStatus('Sincronizado', 'good');
     } catch (e) {
       console.warn('Sync', e);
       setStatus(e.auth ? 'Toque para entrar no Google' : 'Erro: ' + e.message, e.auth ? 'wait' : 'bad');
-    } finally { syncing = false; applyingRemote = false; }
+    } finally {
+      syncing = false; applyingRemote = false;
+      // Houve alteração durante a sincronização: envia de novo em seguida.
+      if (again) { again = false; clearTimeout(timer); timer = setTimeout(() => syncNow(false), 1000); }
+    }
   }
   async function dailyBackup(tk, data) {
     const day = localToday();
@@ -158,6 +167,7 @@
   function changed() {
     if (applyingRemote || !configured()) return;
     ls.set(LS_DIRTY, '1');
+    if (syncing) again = true;
     clearTimeout(timer);
     timer = setTimeout(() => syncNow(false), 2500);
     paintPill();
