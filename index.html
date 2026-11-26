@@ -876,5 +876,5 @@ read();if(!st._del)st._del={};render();
 </script>
 <div id="syncPill" role="status"></div>
 <script src="sync.js"></script>
-<script>if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('sw.js').catch(e=>console.warn('SW',e));</script>
+<script>if('serviceWorker' in navigator&&location.protocol==='https:')navigator.serviceWorker.register('sw.js',{updateViaCache:'none'}).catch(e=>console.warn('SW',e));</script>
 </body></html>
